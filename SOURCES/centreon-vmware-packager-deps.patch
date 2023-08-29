@@ -1,0 +1,12 @@
+--- a/centreon_vmware.pl	2022-08-16 09:21:10.000000000 +0200
++++ b/centreon_vmware.pl	2023-08-29 10:28:11.106189001 +0200
+@@ -20,6 +20,9 @@
+ use warnings;
+ use FindBin;
+ use lib "$FindBin::Bin";
++use lib "$FindBin::Bin/../../centreon-plugins/_packager_deps/lib/perl5";
++use lib "$FindBin::Bin/../_packager_deps/lib/perl5";
++use lib "$FindBin::Bin/../lib/perl5";
+ use centreon::script::centreon_vmware;
+ 
+ centreon::script::centreon_vmware->new()->run();

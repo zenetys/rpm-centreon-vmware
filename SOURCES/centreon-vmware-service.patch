@@ -1,0 +1,12 @@
+--- a/contrib/redhat/centreon_vmware-systemd	2022-08-16 09:21:10.000000000 +0200
++++ b/contrib/redhat/centreon_vmware-systemd	2023-08-29 11:56:54.617169028 +0200
+@@ -19,7 +19,8 @@
+ Description=Centreon VMWare
+ 
+ [Service]
+-ExecStart=/usr/bin/perl /usr/bin/centreon_vmware.pl --logfile=/var/log/centreon/centreon_vmware.log --severity=error
++EnvironmentFile=-/etc/sysconfig/centreon_vmware
++ExecStart=/opt/centreon-vmware/bin/centreon_vmware.pl $OPTIONS
+ Type=simple
+ User=centreon
+ 
