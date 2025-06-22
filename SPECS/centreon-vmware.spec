@@ -110,7 +110,8 @@ fi
 %doc centreon-vmware-%{version}/SECURITY.md
 %license centreon-vmware-%{version}/LICENSE.txt
 %attr(-, centreon, centreon) %{_sysconfdir}/centreon
-%{_sysconfdir}/sysconfig/centreon_vmware
+%config(noreplace) %attr(-, centreon, centreon) %{_sysconfdir}/centreon/centreon_vmware.pm
+%config(noreplace) %{_sysconfdir}/sysconfig/centreon_vmware
 %{_unitdir}/centreon_vmware.service
 /opt/centreon-vmware
 %attr(-, centreon, centreon) %dir %{_localstatedir}/log/centreon
