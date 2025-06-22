@@ -18,9 +18,11 @@ Patch0: centreon-vmware-packager-deps.patch
 Patch1: centreon-vmware-service.patch
 
 # bundled dependencies
-# Download the SDK from https://code.vmware.com/web/sdk/7.0/vsphere-perl
-# and put the file in the SOURCES/ directory in order to build this package
+# Download VMware SDK and put the files in the SOURCES/ directory:
+# https://developer.broadcom.com/sdks/vsphere-perl-sdk/latest
+# https://developer.broadcom.com/sdks/vsan-management-sdk-for-perl/latest
 Source100: VMware-vSphere-Perl-SDK-7.0.0-17698549.x86_64.tar.gz
+Source101: vsan-sdk-perl.zip#/vsan-sdk-perl-8.0U3.zip
 
 BuildArch: noarch
 
@@ -37,8 +39,8 @@ Centreon VMWare connector to check ESX server, VCenter
 and VMWare guest resources.
 
 Bundled dependencies:
-- perl modules from the VMware-vSphere-Perl-SDK available in
-  lib/VMware/share/VMware/
+- perl modules from VMware-vSphere-Perl-SDK
+- perl modules from vsan-sdk-perl
 
 %prep
 # centreon-vmware
@@ -50,6 +52,9 @@ cd ..
 
 # VMware-vSphere-Perl-SDK
 %setup -T -D -a 100
+
+# vsan-sdk-perl
+%setup -T -D -a 101
 
 %install
 # centreon-vmware
@@ -74,6 +79,12 @@ find lib/VMware/share/VMware/ -type f -exec \
     install -p -m 0644 {} %{buildroot}/%{packager_deps}/lib/perl5/VMware/ \;
 install -p -m 0644 doc/EULA %{buildroot}/%{packager_deps}/lib/perl5/VMware/
 install -p -m 0644 doc/README.copyright %{buildroot}/%{packager_deps}/lib/perl5/VMware/
+cd ..
+
+# vsan-sdk-perl
+cd vsan-sdk-perl
+find bindings/ -type f -exec \
+    install -p -m 0644 {} %{buildroot}/%{packager_deps}/lib/perl5/VMware/ \;
 cd ..
 
 %pre
