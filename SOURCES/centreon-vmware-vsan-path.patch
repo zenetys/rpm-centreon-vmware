@@ -1,0 +1,11 @@
+--- a/connectors/vmware/src/centreon/script/centreon_vmware.pm
++++ b/connectors/vmware/src/centreon/script/centreon_vmware.pm
+@@ -133,7 +133,7 @@ sub new {
+             #              'username' => 'XXXXX',
+             #              'password' => 'XXXXXX'}
+         },
+-        vsan_sdk_path          => '/usr/local/share/perl5/VMware'
++        vsan_sdk_path          => '/opt/centreon-vmware/_packager_deps/lib/perl5/VMware'
+     );
+ 
+     $self->{return_child}         = {};

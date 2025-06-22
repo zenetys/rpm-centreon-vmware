@@ -4,18 +4,21 @@
 %define packager_deps %{install_base}/_packager_deps
 
 Name: centreon-vmware
-Version: 3.2.5
+Version: 20250600
 Release: 1%{?dist}.zenetys
 Summary: Centreon VMWare connector
 Group: Applications/System
 License: ASL 2.0
-URL: https://github.com/centreon/centreon-vmware
+URL: https://github.com/centreon/centreon-plugins/tree/master/connectors/vmware
 
 # centreon-vmware
-Source0: https://github.com/centreon/centreon-vmware/archive/refs/tags/%{version}.tar.gz
+Source0: https://github.com/centreon/centreon-plugins/archive/refs/tags/plugins-%{version}.tar.gz
 Source1: centreon_vmware-conf.pm
+Source2: centreon_vmware-sysconfig
 Patch0: centreon-vmware-packager-deps.patch
 Patch1: centreon-vmware-service.patch
+Patch2: centreon-vmware-vsan-path.patch
+Patch3: centreon-vmware-no-vault.patch
 
 # bundled dependencies
 # Download VMware SDK and put the files in the SOURCES/ directory:
@@ -45,9 +48,11 @@ Bundled dependencies:
 %prep
 # centreon-vmware
 %setup -c
-cd centreon-vmware-%{version}
+cd centreon-plugins-plugins-%{version}
 %patch0 -p1
 %patch1 -p1
+%patch2 -p1
+%patch3 -p1
 cd ..
 
 # VMware-vSphere-Perl-SDK
@@ -58,19 +63,22 @@ cd ..
 
 %install
 # centreon-vmware
-cd centreon-vmware-%{version}
-install -d -m 0755 %{buildroot}/%{install_base}/bin
-install -p -m 0755 centreon_vmware.pl %{buildroot}%{install_base}/bin/
-find centreon/ -type f |while read -r; do
-    install -Dp -m 0644 "$REPLY" "%{buildroot}/%{install_base}/lib/perl5/$REPLY"
-done
+cd centreon-plugins-plugins-%{version}/connectors/vmware
+install -d -m 0755 %{buildroot}/%{install_base}/{bin,share}
+install -p -m 0755 src/centreon_vmware.pl %{buildroot}%{install_base}/bin/
+find src/centreon/ -type f -exec \
+    sh -c 'install -Dp -m 0644 "$1" "%{buildroot}/%{install_base}/lib/perl5/${1#src/}"' -- "{}" \;
+mv %{buildroot}/%{install_base}/lib/perl5/centreon/script/centreon_vmware_convert_config_file \
+    %{buildroot}/%{install_base}/share/
+install -Dp -m 0644 packaging/config/centreon_vmware-conf.pm \
+    %{buildroot}/%{install_base}/share/centreon_vmware-conf.pm.sample
 install -d -m 0755 %{buildroot}/%{_sysconfdir}
 install -d -m 0700 %{buildroot}/%{_sysconfdir}/centreon
 install -Dp -m 0600 %{SOURCE1} %{buildroot}/%{_sysconfdir}/centreon/centreon_vmware.pm
-install -Dp -m 0644 contrib/redhat/centreon_vmware-sysconfig %{buildroot}/%{_sysconfdir}/sysconfig/centreon_vmware
-install -Dp -m 0644 contrib/redhat/centreon_vmware-systemd %{buildroot}/%{_unitdir}/centreon_vmware.service
+install -Dp -m 0644 %{SOURCE2} %{buildroot}/%{_sysconfdir}/sysconfig/centreon_vmware
+install -Dp -m 0644 packaging/redhat/centreon_vmware-systemd %{buildroot}/%{_unitdir}/centreon_vmware.service
 install -d -m 0700 %{buildroot}/%{_localstatedir}/log/centreon
-cd ..
+cd ../../..
 
 # VMware-vSphere-Perl-SDK
 cd vmware-vsphere-cli-distrib
@@ -105,10 +113,9 @@ fi
 %systemd_postun_with_restart centreon_vmware.service
 
 %files
-%doc centreon-vmware-%{version}/changelog
-%doc centreon-vmware-%{version}/README.md
-%doc centreon-vmware-%{version}/SECURITY.md
-%license centreon-vmware-%{version}/LICENSE.txt
+%doc centreon-plugins-plugins-%{version}/connectors/vmware/changelog
+%doc centreon-plugins-plugins-%{version}/connectors/vmware/README.md
+%license centreon-plugins-plugins-%{version}/LICENSE.txt
 %attr(-, centreon, centreon) %{_sysconfdir}/centreon
 %config(noreplace) %attr(-, centreon, centreon) %{_sysconfdir}/centreon/centreon_vmware.pm
 %config(noreplace) %{_sysconfdir}/sysconfig/centreon_vmware
