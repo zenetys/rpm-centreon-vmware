@@ -4,7 +4,7 @@
 %define packager_deps %{install_base}/_packager_deps
 
 Name: centreon-vmware
-Version: 20250600
+Version: 20250700
 Release: 1%{?dist}.zenetys
 Summary: Centreon VMWare connector
 Group: Applications/System
@@ -15,6 +15,7 @@ URL: https://github.com/centreon/centreon-plugins/tree/master/connectors/vmware
 Source0: https://github.com/centreon/centreon-plugins/archive/refs/tags/plugins-%{version}.tar.gz
 Source1: centreon_vmware-conf.pm
 Source2: centreon_vmware-sysconfig
+Source3: centreon_vmware-logrotate
 Patch0: centreon-vmware-packager-deps.patch
 Patch1: centreon-vmware-service.patch
 Patch2: centreon-vmware-vsan-path.patch
@@ -76,6 +77,7 @@ install -d -m 0755 %{buildroot}/%{_sysconfdir}
 install -d -m 0700 %{buildroot}/%{_sysconfdir}/centreon
 install -Dp -m 0600 %{SOURCE1} %{buildroot}/%{_sysconfdir}/centreon/centreon_vmware.pm
 install -Dp -m 0644 %{SOURCE2} %{buildroot}/%{_sysconfdir}/sysconfig/centreon_vmware
+install -Dp -m 0644 %{SOURCE3} %{buildroot}/%{_sysconfdir}/logrotate.d/centreon_vmware
 install -Dp -m 0644 packaging/redhat/centreon_vmware-systemd %{buildroot}/%{_unitdir}/centreon_vmware.service
 install -d -m 0700 %{buildroot}/%{_localstatedir}/log/centreon
 cd ../../..
@@ -118,6 +120,7 @@ fi
 %license centreon-plugins-plugins-%{version}/LICENSE.txt
 %attr(-, centreon, centreon) %{_sysconfdir}/centreon
 %config(noreplace) %attr(-, centreon, centreon) %{_sysconfdir}/centreon/centreon_vmware.pm
+%config(noreplace) %{_sysconfdir}/logrotate.d/centreon_vmware
 %config(noreplace) %{_sysconfdir}/sysconfig/centreon_vmware
 %{_unitdir}/centreon_vmware.service
 /opt/centreon-vmware

@@ -1,0 +1,9 @@
+/var/log/centreon/centreon_vmware.log {
+    notifempty
+    missingok
+    delaycompress
+    create 640 centreon centreon
+    postrotate
+        /usr/bin/systemctl try-restart centreon_vmware.service || true
+    endscript
+}
