@@ -1,0 +1,116 @@
+#!/bin/bash
+
+PROGNAME=${0##*/}
+
+DESTDIR=
+eval "$(perl -V:installsitelib)"
+TARGET=$installsitelib
+VSPHERE_TARBALL=
+VSAN_ZIP=
+KEEP=
+TMPDIR="${TMPDIR:-/tmp}/$PROGNAME.$RANDOM"
+
+PATCH_CENTREON='--- lib/VMware/share/VMware/VICommon.pm	2025-04-24 17:18:24.938290503 +0200
++++ VICommon.pm	2025-04-24 17:18:18.690399614 +0200
+@@ -2319,6 +2319,8 @@
+    my $user_agent = $self->{user_agent};
+    $user_agent->cookie_jar->as_string
+       =~ m/(.*)vmware_soap_session=\"\\\"([0-9a-zA-Z-](.*)+)\\\"\"(.*)/;
++   $user_agent->cookie_jar->as_string
++      =~ m/(.*)vmware_soap_session=[\\\"]*([0-9a-zA-Z-]+)/ unless $2;
+    return $2;
+ }'
+
+function exit_usage() {
+    local status=${1:-0}
+    [[ "$status" != "0" ]] && exec >&2
+    echo "\
+Usage: $PROGNAME [OPTION...] \\
+           --vsphere VMware-vSphere-Perl-SDK...tar.gz \\
+           --vsan vsan-sdk-perl...zip
+Install VMware perl modules
+
+Available options:
+  -d, --destdir Optional install path prefix
+  -t, --target  Install path
+  --vsphere     Path to downloaded VMware-vSphere-Perl-SDK tarball
+  --vsan        Path to downloaded vsan-sdk-perl ZIP file
+  -h, --help    Display this help.
+
+Download VMware vSphere and vsan SDK from Broadcom website, then use --vsphere
+and --vsan options to pass them to this script:
+https://developer.broadcom.com/sdks/vsphere-perl-sdk/latest
+https://developer.broadcom.com/sdks/vsan-management-sdk-for-perl/latest
+
+Current settings:
+DESTDIR=$DESTDIR
+TARGET=$TARGET
+VSPHERE_TARBALL=$VSPHERE_TARBALL
+VSAN_ZIP=$VSAN_ZIP
+"
+    exit "$status"
+}
+
+function fatal() {
+    echo "FATAL: $*" >&2
+    exit 2
+}
+
+function on_exit() {
+    [[ -d $TMPDIR ]] || return 0
+    rm -rf "$TMPDIR"
+}
+
+while (( $# > 0 )); do
+    case "$1" in
+        -d|--destdir) DESTDIR=$2; shift ;;
+        -t|--target) TARGET=$2; shift ;;
+        --vsphere) VSPHERE_TARBALL=$2; shift ;;
+        --vsan) VSAN_ZIP=$2; shift ;;
+        -h|--help) exit_usage ;;
+        *) exit_usage 1 ;;
+    esac
+    shift
+done
+
+[[ -n $VSPHERE_TARBALL ]] || exit_usage 1
+[[ -n $VSAN_ZIP ]] || exit_usage 1
+
+[[ -n $DESTDIR && ${DESTDIR: -1} != / && ${TARGET:0:1} != / ]] && DESTDIR+=/
+[[ -n $TARGET ]] || fatal 'Could not guess perl installsitelib, use --target'
+TARGET+=/VMware
+
+trap on_exit EXIT
+mkdir -p "$TMPDIR" || fatal 'Failed to create temporary directory'
+mkdir -p "${DESTDIR}${TARGET}" || fatal 'Failed to create target directory'
+
+if [[ $VSPHERE_TARBALL == *://* ]]; then
+    url=$VSPHERE_TARBALL
+    VSPHERE_TARBALL="$TMPDIR/vmware-vsphere-perl-sdk.tar.gz"
+    curl -L -f --connect-timeout 10 -o "$VSPHERE_TARBALL" "$url" ||
+        fatal 'Failed to download VMware vSphere perl SDK tarball'
+fi
+
+tar xzf "$VSPHERE_TARBALL" -C "$TMPDIR/" ||
+    fatal 'Failed to extract VMware vSphere perl SDK tarball'
+
+echo "$PATCH_CENTREON" |patch -p0 -d "$TMPDIR/vmware-vsphere-cli-distrib" &&
+    find "$TMPDIR/vmware-vsphere-cli-distrib/lib/VMware/share/VMware/" -type f -print0 |
+        xargs -t -0 install -p -m 0644 -t "${DESTDIR}${TARGET}/" &&
+    install -p -m 0644 "$TMPDIR/vmware-vsphere-cli-distrib/doc/EULA" "${DESTDIR}${TARGET}/" &&
+    install -p -m 0644 "$TMPDIR/vmware-vsphere-cli-distrib/doc/README.copyright" "${DESTDIR}${TARGET}/"
+(( $? == 0 )) || fatal 'Failed to install VMware vSphere perl SDK'
+
+if [[ $VSAN_ZIP == *://* ]]; then
+    url=$VSAN_ZIP
+    VSAN_ZIP="$TMPDIR/vmware-vsan-perl-sdk.tar.gz"
+    curl -L -f --connect-timeout 10 -o "$VSAN_ZIP" "$url" ||
+        fatal 'Failed to download VMware vsan perl SDK zip'
+fi
+
+unzip -q "$VSAN_ZIP" -d "$TMPDIR/" ||
+    fatal 'Failed to extract VMware vsan perl SDK zip'
+
+find $TMPDIR/vsan-sdk-perl/bindings/ -type f -print0 |
+    xargs -t -0 install -p -m 0644 -t "${DESTDIR}${TARGET}/"
+(( $? == 0 )) || fatal 'Failed to install VMware vsan perl SDK'

@@ -1,11 +1,21 @@
 # Supported targets: el9
 
 %define install_base /opt/centreon-vmware
-%define packager_deps %{install_base}/_packager_deps
+%define vmware_modules_howto %(cat <<EOF
+Perl modules from VMware vSphere and VMware vsan SDKs must be installed
+on the system for this software to work.
+The SDKs can be downloaded from Broadcom website:
+- https://developer.broadcom.com/sdks/vsphere-perl-sdk/latest
+- https://developer.broadcom.com/sdks/vsan-management-sdk-for-perl/latest
+An helper script is provided to install the modules, eg:
+%{install_base}/share/install-vmware-perl-modules \\\\
+    --vsphere /tmp/VMware-vSphere-Perl-SDK-7.0.0-17698549.x86_64.tar.gz \\\\
+    --vsan /tmp/vsan-sdk-perl-8.0U3.zip
+EOF)
 
 Name: centreon-vmware
 Version: 20250700
-Release: 1%{?dist}.zenetys
+Release: 2%{?dist}.zenetys
 Summary: Centreon VMWare connector
 Group: Applications/System
 License: ASL 2.0
@@ -16,17 +26,10 @@ Source0: https://github.com/centreon/centreon-plugins/archive/refs/tags/plugins-
 Source1: centreon_vmware-conf.pm
 Source2: centreon_vmware-sysconfig
 Source3: centreon_vmware-logrotate
+Source4: install-vmware-perl-modules
 Patch0: centreon-vmware-packager-deps.patch
 Patch1: centreon-vmware-service.patch
-Patch2: centreon-vmware-vsan-path.patch
-Patch3: centreon-vmware-no-vault.patch
-
-# bundled dependencies
-# Download VMware SDK and put the files in the SOURCES/ directory:
-# https://developer.broadcom.com/sdks/vsphere-perl-sdk/latest
-# https://developer.broadcom.com/sdks/vsan-management-sdk-for-perl/latest
-Source100: VMware-vSphere-Perl-SDK-7.0.0-17698549.x86_64.tar.gz
-Source101: vsan-sdk-perl.zip#/vsan-sdk-perl-8.0U3.zip
+Patch2: centreon-vmware-no-vault.patch
 
 BuildArch: noarch
 
@@ -39,12 +42,10 @@ Requires: perl-Text-Template
 Requires: perl-Sys-Syslog
 
 %description
-Centreon VMWare connector to check ESX server, VCenter
-and VMWare guest resources.
+Centreon VMWare connector to check ESX server, VCenter and VMWare
+guest resources.
 
-Bundled dependencies:
-- perl modules from VMware-vSphere-Perl-SDK
-- perl modules from vsan-sdk-perl
+%{vmware_modules_howto}
 
 %prep
 # centreon-vmware
@@ -53,24 +54,19 @@ cd centreon-plugins-plugins-%{version}
 %patch0 -p1
 %patch1 -p1
 %patch2 -p1
-%patch3 -p1
 cd ..
-
-# VMware-vSphere-Perl-SDK
-%setup -T -D -a 100
-
-# vsan-sdk-perl
-%setup -T -D -a 101
 
 %install
 # centreon-vmware
 cd centreon-plugins-plugins-%{version}/connectors/vmware
 install -d -m 0755 %{buildroot}/%{install_base}/{bin,share}
 install -p -m 0755 src/centreon_vmware.pl %{buildroot}%{install_base}/bin/
-find src/centreon/ -type f -exec \
-    sh -c 'install -Dp -m 0644 "$1" "%{buildroot}/%{install_base}/lib/perl5/${1#src/}"' -- "{}" \;
+find src/centreon/ -type f |while read -r; do
+    install -Dp -m 0644 "$REPLY" "%{buildroot}/%{install_base}/lib/perl5/${REPLY#src/}"
+done
 mv %{buildroot}/%{install_base}/lib/perl5/centreon/script/centreon_vmware_convert_config_file \
     %{buildroot}/%{install_base}/share/
+chmod 0755 %{buildroot}/%{install_base}/share/centreon_vmware_convert_config_file
 install -Dp -m 0644 packaging/config/centreon_vmware-conf.pm \
     %{buildroot}/%{install_base}/share/centreon_vmware-conf.pm.sample
 install -d -m 0755 %{buildroot}/%{_sysconfdir}
@@ -78,24 +74,10 @@ install -d -m 0700 %{buildroot}/%{_sysconfdir}/centreon
 install -Dp -m 0600 %{SOURCE1} %{buildroot}/%{_sysconfdir}/centreon/centreon_vmware.pm
 install -Dp -m 0644 %{SOURCE2} %{buildroot}/%{_sysconfdir}/sysconfig/centreon_vmware
 install -Dp -m 0644 %{SOURCE3} %{buildroot}/%{_sysconfdir}/logrotate.d/centreon_vmware
+install -Dp -m 0755 -t %{buildroot}/%{install_base}/share/ %{SOURCE4}
 install -Dp -m 0644 packaging/redhat/centreon_vmware-systemd %{buildroot}/%{_unitdir}/centreon_vmware.service
 install -d -m 0700 %{buildroot}/%{_localstatedir}/log/centreon
 cd ../../..
-
-# VMware-vSphere-Perl-SDK
-cd vmware-vsphere-cli-distrib
-install -d -m 0755 %{buildroot}/%{packager_deps}/lib/perl5/VMware
-find lib/VMware/share/VMware/ -type f -exec \
-    install -p -m 0644 {} %{buildroot}/%{packager_deps}/lib/perl5/VMware/ \;
-install -p -m 0644 doc/EULA %{buildroot}/%{packager_deps}/lib/perl5/VMware/
-install -p -m 0644 doc/README.copyright %{buildroot}/%{packager_deps}/lib/perl5/VMware/
-cd ..
-
-# vsan-sdk-perl
-cd vsan-sdk-perl
-find bindings/ -type f -exec \
-    install -p -m 0644 {} %{buildroot}/%{packager_deps}/lib/perl5/VMware/ \;
-cd ..
 
 %pre
 if ! getent group centreon >/dev/null; then
@@ -107,6 +89,7 @@ fi
 
 %post
 %systemd_post centreon_vmware.service
+echo '%{vmware_modules_howto}' |sed -re 's,^,%{name}: ,'
 
 %preun
 %systemd_preun centreon_vmware.service
@@ -123,5 +106,5 @@ fi
 %config(noreplace) %{_sysconfdir}/logrotate.d/centreon_vmware
 %config(noreplace) %{_sysconfdir}/sysconfig/centreon_vmware
 %{_unitdir}/centreon_vmware.service
-/opt/centreon-vmware
+%{install_base}
 %attr(-, centreon, centreon) %dir %{_localstatedir}/log/centreon
