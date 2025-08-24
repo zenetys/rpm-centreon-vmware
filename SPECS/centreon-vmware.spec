@@ -15,7 +15,7 @@ EOF)
 
 Name: centreon-vmware
 Version: 20250800
-Release: 1%{?dist}.zenetys
+Release: 2%{?dist}.zenetys
 Summary: Centreon VMWare connector
 Group: Applications/System
 License: ASL 2.0
@@ -40,6 +40,9 @@ Requires: centreon-plugins
 Requires: perl-XML-LibXML
 Requires: perl-Text-Template
 Requires: perl-Sys-Syslog
+
+# install-vmware-perl-modules helper script requires the patch command
+Requires: patch
 
 %description
 Centreon VMWare connector to check ESX server, VCenter and VMWare
