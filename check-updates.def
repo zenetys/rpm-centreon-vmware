@@ -1,1 +1,1 @@
-centreon-vmware 20250800 tags-from-path:master:connectors/vmware/ https://github.com/centreon/centreon-plugins <(2[0-9]+([^0-9][0-9]+)?)
+centreon-vmware 20251200 tags-from-path:master:connectors/vmware/ https://github.com/centreon/centreon-plugins <(2[0-9]+([^0-9][0-9]+)?)

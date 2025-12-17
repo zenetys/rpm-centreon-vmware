@@ -1,30 +1,33 @@
+diff --git a/connectors/vmware/src/centreon/script/centreon_vmware.pm b/connectors/vmware/src/centreon/script/centreon_vmware.pm
+index fc505181c..cb0afe821 100644
 --- a/connectors/vmware/src/centreon/script/centreon_vmware.pm
 +++ b/connectors/vmware/src/centreon/script/centreon_vmware.pm
 @@ -32,7 +32,6 @@ use JSON::XS;
  use centreon::vmware::script;
  use centreon::vmware::common;
  use centreon::vmware::connector;
--use centreon::script::centreonvault;
+-use centreon::script::centreonsecrets;
  
  my ($centreon_vmware, $frontend);
  
-@@ -110,7 +109,6 @@ sub new {
+@@ -110,8 +109,6 @@ sub new {
      $self->add_options(
-             'config-extra=s' => \$self->{opt_extra},
-             'check-config'   => \$self->{opt_check_config},
--            'vault-config=s' => \$self->{opt_vault_config}
+         'config-extra=s'   => \$self->{opt_extra},
+         'check-config'     => \$self->{opt_check_config},
+-        'vault-config=s'   => \$self->{opt_vault_config},
+-        'engine-context=s' => \$self->{opt_engine_context},
      );
  
      %{$self->{centreon_vmware_default_config}} = (
-@@ -142,7 +140,6 @@ sub new {
+@@ -143,7 +140,6 @@ sub new {
      $self->{counter_stats}        = {};
      $self->{whoaim}               = undef; # to know which vsphere to connect
      $self->{modules_registry}     = {};
--    $self->{vault}                = {};
+-    $self->{secrets}              = {};
  
      return $self;
  }
-@@ -220,17 +217,6 @@ sub init {
+@@ -224,23 +220,6 @@ sub init {
  
      $self->read_configuration(filename => $self->{opt_extra});
  
@@ -33,34 +36,221 @@
 -        $self->{logger}->writeLogInfo("No vault config file given. Applying default: " . $self->{opt_vault_config});
 -    }
 -
--    $self->{logger}->writeLogDebug("Vault config file " . $self->{opt_vault_config} . " exists. Creating the vault object.");
--    $self->{vault} = centreon::script::centreonvault->new(
--            'logger'      => $self->{logger},
--            'config_file' => $self->{opt_vault_config}
+-    if (! defined($self->{opt_engine_context}) || $self->{opt_engine_context} eq '') {
+-        $self->{opt_engine_context} = '/etc/centreon-engine/engine-context.json';
+-        $self->{logger}->writeLogInfo("No Engine context config file given. Applying default: " . $self->{opt_engine_context});
+-    }
+-
+-    $self->{logger}->writeLogDebug("Calling the centreonsecrets object's constructor.");
+-    $self->{secrets} = centreon::script::centreonsecrets->new(
+-        'logger'             => $self->{logger},
+-        'opt_vault_config'   => $self->{opt_vault_config},
+-        'opt_engine_context' => $self->{opt_engine_context},
 -    );
 -
      ##### Load modules
      $self->load_module(@load_modules);
  
-@@ -274,13 +260,6 @@ sub init {
+@@ -284,13 +263,6 @@ sub init {
              if (!defined($self->{centreon_vmware_config}->{vsphere_server}->{$server}->{password})) {
                 $self->{logger}->writeLogFatal("Can't get password for couple host='" . $server . "', username='" . $self->{centreon_vmware_config}->{vsphere_server}->{$server}->{username} . "' : $@");
              }
 -        } else {
--            # we let the vault object handle the secrets
+-            # we let the secrets object handle the secrets
 -            for my $key ('username', 'password') {
 -                $self->{logger}->writeLogDebug("Retrieving secret: $key");
 -                $self->{centreon_vmware_config}->{vsphere_server}->{$server}->{$key}
--                    = $self->{vault}->get_secret($self->{centreon_vmware_config}->{vsphere_server}->{$server}->{$key});
+-                    = $self->{secrets}->get_secret($self->{centreon_vmware_config}->{vsphere_server}->{$server}->{$key});
 -            }
          }
      }
  
+diff --git a/connectors/vmware/src/centreon/script/centreonsecrets.pm b/connectors/vmware/src/centreon/script/centreonsecrets.pm
+deleted file mode 100644
+index aa1799875..000000000
+--- a/connectors/vmware/src/centreon/script/centreonsecrets.pm
++++ /dev/null
+@@ -1,172 +0,0 @@
+-#
+-# Copyright 2025-Present Centreon (http://www.centreon.com/)
+-#
+-# Centreon is a full-fledged industry-strength solution that meets
+-# the needs in IT infrastructure and application monitoring for
+-# service performance.
+-#
+-# Licensed under the Apache License, Version 2.0 (the "License");
+-# you may not use this file except in compliance with the License.
+-# You may obtain a copy of the License at
+-#
+-#     http://www.apache.org/licenses/LICENSE-2.0
+-#
+-# Unless required by applicable law or agreed to in writing, software
+-# distributed under the License is distributed on an "AS IS" BASIS,
+-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+-# See the License for the specific language governing permissions and
+-# limitations under the License.
+-#
+-
+-package centreon::script::centreonsecrets;
+-
+-use strict;
+-use warnings;
+-use JSON::XS;
+-use MIME::Base64;
+-use Crypt::OpenSSL::AES;
+-use Net::Curl::Easy qw(:constants);
+-use centreon::vmware::common qw(VAULT_PATH_REGEX ENCRYPTED_PATH_REGEX);
+-use centreon::script::centreonvault;
+-use centreon::script::credentialsencryption;
+-
+-
+-sub new {
+-    my ($class, %options) = @_;
+-    my $self  = bless \%options, $class;
+-    # mandatory options:
+-    # - logger: logger object
+-    # - opt_vault_config: path of a JSON vault config file
+-    # - opt_engine_context: path of a JSON engine context config file
+-
+-    $self->{vault} = {};
+-    $self->{encryption} = {};
+-    $self->{enabled} = 1;
+-    $self->{crypted_credentials} = 1;
+-
+-    if ( !$self->init() ) {
+-        $self->{enabled} = 0;
+-        $self->{logger}->writeLogInfo("Something happened during init() method that makes secrets object not usable.");
+-    }
+-    return $self;
+-}
+-
+-sub init {
+-    my ($self, %options) = @_;
+-
+-    $self->check_options() or return undef;
+-
+-    # check if the following information is available
+-    $self->{logger}->writeLogDebug("Calling the vault object's constructor.");
+-    $self->{vault} = centreon::script::centreonvault->new(
+-        'logger'      => $self->{logger},
+-        'config_file' => $self->{opt_vault_config}
+-    );
+-    $self->{logger}->writeLogDebug("Calling the credentials encryption object's constructor.");
+-    $self->{encryption} = centreon::script::credentialsencryption->new(
+-        'logger'      => $self->{logger},
+-        'config_file' => $self->{opt_engine_context}
+-    );
+-
+-    return 1;
+-}
+-
+-sub check_options {
+-    my ($self, %options) = @_;
+-
+-    if ( !defined($self->{logger}) ) {
+-        die "[centreonsecrets:check_options] FATAL: No logger given to the constructor. Secrets cannot be used.";
+-    }
+-
+-    return 1;
+-}
+-
+-sub check_configuration {
+-    my ($self, %options) = @_;
+-
+-    return 1;
+-}
+-
+-sub get_secret {
+-    my ($self, $secret) = @_;
+-
+-    # if vault not enabled, return the secret unchanged
+-    return $secret if ( ! $self->{enabled});
+-
+-    $self->{logger}->writeLogDebug("Secret to reveal: " . centreon::vmware::common::obfuscate_secret($secret));
+-    return $self->{vault}->get_secret($secret) if ($secret =~ VAULT_PATH_REGEX);
+-    return $self->{encryption}->get_secret($secret) if ($secret =~ ENCRYPTED_PATH_REGEX);
+-
+-    $self->{logger}->writeLogDebug("The secret does not look like a secret. Using it as a plain text credential.");
+-    return $secret;
+-}
+-
+-1;
+-
+-__END__
+-
+-=head1 NAME
+-
+-Centreon secrets manager. Used as an interface to use either Centreon Vault or Centreon Credentials Encryption modules.
+-
+-=head1 SYNOPSIS
+-
+-Allows to retrieve secrets (usually username and password) from a Hashicorp vault compatible API of from Centreon
+-encrypted credentials.
+-
+-    use centreon::vmware::logger;
+-    use centreon::script::centreonsecrets;
+-    my $vault = centreon::script::centreonsecrets->new(
+-        (
+-            'logger'             => centreon::vmware::logger->new(),
+-            'opt_vault_config'   => '/var/lib/centreon/vault/vault.json',
+-            'opt_engine_context' => '/etc/centreon-engine/engine-context.json'
+-        )
+-    );
+-    my $password_from_vault = $vault->get_secret('secret::hashicorp_vault::mypath/to/mysecrets::password');
+-    my $password_from_encryption = $vault->get_secret('encrypted::encrypted_password');
+-
+-=head1 METHODS
+-
+-=head2 new(\%options)
+-
+-Constructor of the vault object.
+-
+-%options must provide:
+-
+-- C<logger>: an object of the centreon::vmware::logger class.
+-
+-- C<opt_vault_config>: full path and file name of the Centreon Vault JSON config file.
+-
+-- C<opt_engine_context>: full path and file name of the Centreon Engine context JSON file.
+-
+-The default opt_vault_config path should be '/var/lib/centreon/vault/vault.json'.
+-The default opt_engine_context path should be '/etc/centreon-engine/engine-context.json'.
+-The expected file format for Centreon Vault is:
+-
+-    {
+-        "name": "hashicorp_vault",
+-        "url": "vault-server.my-domain.com",
+-        "salt": "<base64 encoded(<32 bytes long key used to hash the encrypted data)>",
+-        "port": 443,
+-        "root_path": "vmware_daemon",
+-        "role_id": "<base64 encoded(<iv><hmac_hash><encrypted_role_id>)",
+-        "secret_id": "<base64 encoded(<iv><hmac_hash><encrypted_secret_id>)"
+-    }
+-
+-The expected file format for Centreon Engine context is:
+-
+-    {
+-        "app_secret": "<hexadecimal value of the AES encryption/decryption key>",
+-        "salt": "<base64 encoded(<32 bytes long key used to hash the encrypted data)>"
+-    }
+-
+-=head2 get_secret($secret)
+-
+-Returns the encrypted secret or the secret stored in the Centreon Vault at the given path.
+-If the format of the secret matches none of the regular expressions
+-C</^secret::hashicorp_vault::([^:]+)::(.+)$/> or
+-C</^encrypted::(.+)$/>
+-or in case of any failure in the process, the method will return the secret unchanged.
+-
+-=cut
+diff --git a/connectors/vmware/src/centreon/script/centreonvault.pm b/connectors/vmware/src/centreon/script/centreonvault.pm
+deleted file mode 100644
+index d72af6967..000000000
 --- a/connectors/vmware/src/centreon/script/centreonvault.pm
 +++ /dev/null
-@@ -1,382 +0,0 @@
+@@ -1,328 +0,0 @@
 -#
--# Copyright 2024 Centreon (http://www.centreon.com/)
+-# Copyright 2025-Present Centreon (http://www.centreon.com/)
 -#
 -# Centreon is a full-fledged industry-strength solution that meets
 -# the needs in IT infrastructure and application monitoring for
@@ -87,9 +277,7 @@
 -use MIME::Base64;
 -use Crypt::OpenSSL::AES;
 -use Net::Curl::Easy qw(:constants);
--use centreon::vmware::common;
--
--my $VAULT_PATH_REGEX = qr/^secret::hashicorp_vault::([^:]+)::(.+)$/;
+-use centreon::vmware::common qw(VAULT_PATH_REGEX);
 -
 -sub new {
 -    my ($class, %options) = @_;
@@ -147,7 +335,7 @@
 -    }
 -    if ( ! -f $self->{config_file} ) {
 -        $self->{logger}->writeLogError("The given configuration file " . $self->{config_file}
--            . " does not exist. Passwords won't be retrieved from Centreonvault. Ignore this if you don't use Centreonvault.");
+-            . " does not exist. Passwords won't be retrieved from Centreonvault. Ignore this error if you don't use Centreonvault.");
 -        return undef;
 -    }
 -
@@ -189,84 +377,33 @@
 -        $self->{encryption_key} = $ENV{'APP_SECRET'}; # key for aes-256-cbc
 -    }
 -
--
--
--
 -    return 1;
--}
--
--sub extract_and_decrypt {
--    my ($self, %options) = @_;
--
--    my $input = decode_base64($options{data});
--    $self->{logger}->writeLogDebug("data to extract and decrypt: '" . $options{data} . "'");
--
--    # with AES-256, the IV length must 16 bytes
--    my $iv_length = 16;
--    # extract the IV, the hashed data, the encrypted data
--    my $iv             = substr($input, 0, $iv_length);     # initialization vector
--    my $hashed_data    = substr($input, $iv_length, 64);    # hmac of the original data, for integrity control
--    my $encrypted_data = substr($input, $iv_length + 64);   # data to decrypt
--
--    # create the AES object
--    $self->{logger}->writeLogDebug(
--            "Creating the AES decryption object for initialization vector (IV) of length "
--            . length($iv) . "B, key of length " . length($self->{encryption_key}) . "B."
--    );
--    my $cipher;
--    eval {
--        $cipher = Crypt::OpenSSL::AES->new(
--            decode_base64( $self->{encryption_key} ),
--            {
--                'cipher'  => 'AES-256-CBC',
--                'iv'      => $iv,
--                'padding' => 1
--            }
--        );
--    };
--    if ($@) {
--        $self->{logger}->writeLogError("There was an error while creating the AES object: " . $@);
--        return undef;
--    }
--
--    # decrypt
--    $self->{logger}->writeLogDebug("Decrypting the data of length " . length($encrypted_data) . "B.");
--    my $decrypted_data;
--    eval {$decrypted_data = $cipher->decrypt($encrypted_data);};
--    if ($@) {
--        $self->{logger}->writeLogError("There was an error while decrypting one of the AES-encrypted data: " . $@);
--        return undef;
--    }
--
--    return $decrypted_data;
 -}
 -
 -sub authenticate {
 -    my ($self) = @_;
 -
+-    my @ids_list = ('role_id', 'secret_id');
 -    # initial value: assuming the role and secret id might not be encrypted
--    my $role_id   = $self->{vault_config}->{role_id};
--    my $secret_id = $self->{vault_config}->{secret_id};
+-    my ($role_id, $secret_id) = map $self->{vault_config}->{$_}, @ids_list;
 -
--
+-    # now if credentials are encrypted
 -    if ($self->{crypted_credentials}) {
--        # Then decrypt using https://github.com/perl-openssl/perl-Crypt-OpenSSL-AES
--        # keep the decrypted data in local variables so that they stay in memory for as little time as possible
--        $self->{logger}->writeLogDebug("Decrypting the credentials needed to authenticate to the vault.");
--        $role_id   = $self->extract_and_decrypt( ('data' => $role_id ));
--        $secret_id = $self->extract_and_decrypt( ('data' => $secret_id ));
+-        ($role_id, $secret_id) = map
+-            centreon::vmware::common::aes256_decrypt(
+-                'data'       => $self->{vault_config}->{$_},
+-                'app_secret' => $self->{encryption_key},
+-                'logger'     => $self->{logger}
+-            ), @ids_list;
 -        $self->{logger}->writeLogDebug("role_id and secret_id have been decrypted.");
--    } else {
--        $self->{logger}->writeLogDebug("role_id and secret_id are not crypted");
 -    }
--
+-    my $post_data = "role_id=$role_id&secret_id=$secret_id";
 -
 -    # Authenticate to get the token
 -    my $url = "https://" . $self->{vault_config}->{url} . ":" . $self->{vault_config}->{port} . "/v1/auth/approle/login";
 -    $self->{logger}->writeLogDebug("Authenticating to the vault server at URL: $url");
 -    $self->{curl_easy}->setopt( CURLOPT_URL, $url );
 -
--    my $post_data = "role_id=$role_id&secret_id=$secret_id";
 -    my $auth_result_json;
 -    # to get more details (in STDERR)
 -    #$self->{curl_easy}->setopt(CURLOPT_VERBOSE, 1);
@@ -332,7 +469,7 @@
 -    # if vault not enabled, return the secret unchanged
 -    return $secret if ( ! $self->{enabled});
 -
--    my ($secret_path, $secret_name) = $secret =~ $VAULT_PATH_REGEX;
+-    my ($secret_path, $secret_name) = $secret =~ VAULT_PATH_REGEX;
 -    if (!defined($secret_path) || !defined($secret_name)) {
 -        $self->{logger}->writeLogInfo("A string given to get_secret does not look like a secret. Using it as a plain text credential?");
 -        return $secret;
@@ -363,7 +500,6 @@
 -    }
 -
 -    $self->{logger}->writeLogDebug("Request passed.");
--    # request_id
 -
 -    # the result is a json string, convert it into an object
 -    my $get_result_obj = centreon::vmware::common::transform_json_to_object($get_result_json);
@@ -396,7 +532,7 @@
 -
 -=head1 SYNOPSIS
 -
--Allows to retrieve secrets (usually username and password) from a Hashicorp vault compatible API.
+-Allows to retrieve secrets (usually username and password) from a HashiCorp vault compatible API.
 -
 -    use centreon::vmware::logger;
 -    use centreon::script::centreonvault;
@@ -441,9 +577,11 @@
 -or in case of any failure in the process, the method will return the secret unchanged.
 -
 -=cut
+diff --git a/connectors/vmware/src/centreon_vmware.pl b/connectors/vmware/src/centreon_vmware.pl
+index 2b85e6635..c1b59da67 100644
 --- a/connectors/vmware/src/centreon_vmware.pl
 +++ b/connectors/vmware/src/centreon_vmware.pl
-@@ -42,10 +42,6 @@ centreon_vmware.pl [options]
+@@ -50,10 +50,6 @@ centreon_vmware.pl [options]
  
  Specify the path to the centreon_vmware configuration file (default: /etc/centreon/centreon_vmware.pm).
  

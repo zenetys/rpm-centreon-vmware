@@ -14,8 +14,8 @@ An helper script is provided to install the modules, eg:
 EOF)
 
 Name: centreon-vmware
-Version: 20250800
-Release: 2%{?dist}.zenetys
+Version: 20251200
+Release: 1%{?dist}.zenetys
 Summary: Centreon VMWare connector
 Group: Applications/System
 License: ASL 2.0
