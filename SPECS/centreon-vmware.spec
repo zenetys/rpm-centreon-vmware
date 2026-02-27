@@ -14,7 +14,7 @@ An helper script is provided to install the modules, eg:
 EOF)
 
 Name: centreon-vmware
-Version: 20251200
+Version: 20260200
 Release: 1%{?dist}.zenetys
 Summary: Centreon VMWare connector
 Group: Applications/System
